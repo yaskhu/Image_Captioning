@@ -1,17 +1,14 @@
 ﻿import logging
 from PIL import Image, UnidentifiedImageError
 
-from transformers import BlipProcessor, BlipForConditionalGeneration
 import torch
+from transformers import VisionEncoderDecoderModel, ViTImageProcessor, AutoTokenizer
 
-# BLEU imports
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 
-
-# ------------------ CUSTOM EXCEPTIONS ------------------
 
 class InvalidImageError(ValueError):
     pass
@@ -21,29 +18,29 @@ class CaptionModelError(RuntimeError):
     pass
 
 
-# ------------------ PREDICTION SERVICE ------------------
-
 class PredictionService:
     def __init__(self) -> None:
         try:
-            logger.info("Loading BLIP model...")
+            logger.info("Loading lightweight caption model...")
 
-            self.processor = BlipProcessor.from_pretrained(
-                "Salesforce/blip-image-captioning-base"
+            self.model = VisionEncoderDecoderModel.from_pretrained(
+                "nlpconnect/vit-gpt2-image-captioning"
             )
-
-            self.model = BlipForConditionalGeneration.from_pretrained(
-                "Salesforce/blip-image-captioning-base"
+            self.processor = ViTImageProcessor.from_pretrained(
+                "nlpconnect/vit-gpt2-image-captioning"
+            )
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                "nlpconnect/vit-gpt2-image-captioning"
             )
 
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
             self.model.to(self.device)
 
-            logger.info("BLIP model loaded successfully")
+            logger.info("Model loaded successfully")
 
         except Exception as error:
-            logger.exception("Failed to load BLIP model")
-            raise CaptionModelError("Unable to load pretrained caption model") from error
+            logger.exception("Failed to load model")
+            raise CaptionModelError("Unable to load caption model") from error
 
     def _load_image(self, image_file) -> Image.Image:
         try:
@@ -61,11 +58,12 @@ class PredictionService:
         try:
             image = self._load_image(image_file)
 
-            inputs = self.processor(images=image, return_tensors="pt").to(self.device)
+            pixel_values = self.processor(images=image, return_tensors="pt").pixel_values
+            pixel_values = pixel_values.to(self.device)
 
-            output = self.model.generate(**inputs)
+            output_ids = self.model.generate(pixel_values, max_length=16, num_beams=4)
 
-            caption = self.processor.decode(output[0], skip_special_tokens=True)
+            caption = self.tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
             return caption
 
@@ -74,13 +72,8 @@ class PredictionService:
             raise CaptionModelError("Failed to generate caption") from error
 
 
-# ------------------ BLEU SCORE FUNCTION ------------------
-
+# ✅ BLEU FUNCTION (OUTSIDE CLASS)
 def compute_bleu(reference: str, prediction: str) -> float:
-    """
-    Compute BLEU score between expected caption and predicted caption
-    """
-
     reference_tokens = [reference.lower().split()]
     prediction_tokens = prediction.lower().split()
 
