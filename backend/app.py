@@ -4,7 +4,7 @@ import os
 from flask import Flask, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from utils.predict import (
+from backend.utils.predict import (
     CaptionModelError,
     InvalidImageError,
     PredictionService,
